@@ -42,7 +42,9 @@ function ConsultationForm() {
 
     const rawBase = process.env.NEXT_PUBLIC_BACKEND_URL || "";
     const base = rawBase.replace(/\/$/, "");
-    const consultationUrl = base ? `${base}/api/consultation` : `/api/consultation`;
+    const consultationUrl = base
+      ? `${base}/api/consultation`
+      : `/api/consultation`;
 
     await fetchEventSource(consultationUrl, {
       signal: controller.signal,
