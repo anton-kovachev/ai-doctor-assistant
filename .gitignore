@@ -81,7 +81,7 @@ npm-packages-offline-cache/
 /terraform/terraform.tfstate
 /terraform/terraform.tfstate.backup
 /terraform/.terraform/
-/terraform/terraform.tvars
+/terraform/terraform.tfvars
 
 # Docker
 docker-compose.override.yml
