@@ -16,6 +16,11 @@ email_smtp_server              = "smtp.example.com"
 email_app_password             = "REPLACE_WITH_APP_PASSWORD"
 email_address                  = "you@example.com"
 
+# Frontend configuration
+# This value will be injected into the Next.js build as `NEXT_PUBLIC_BACKEND_URL`
+# e.g. "http://localhost:8000" for local Docker / dev
+next_public_backend_url        = "http://localhost:8000"
+
 # Optional deployment settings
 project_name                   = "ai-doctor-assistant"
 aws_region                     = "eu-north-1"
