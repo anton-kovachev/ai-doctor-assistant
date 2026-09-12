@@ -6,20 +6,22 @@ from agents.mcp import (
 )
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def get_healthcare_mcp_servers() -> list[MCPServerStdio]:
-    # Implement the logic to return a list of MCPServerStdio instances
+    # Use a local wrapper script that ensures dependencies are installed
+    # and then execs the healthcare-mcp Node server. The wrapper is
+    # `scripts/run_healthcare_mcp.sh` at the repository root.
+    wrapper = PROJECT_ROOT / "scripts" / "run_healthcare_mcp.sh"
+
     mcp_server_params = [
         MCPServerStdioParams(
             {
-                # Launch the healthcare MCP directly from its GitHub repo using npx.
-                # This avoids requiring the files to exist locally — npx will
-                # fetch the repo package and run its declared binary.
-                "command": "npx",
-                "args": ["--yes", "github:Cicatriiz/healthcare-mcp-public"],
-                "cwd": str(ROOT_DIR),
+                "command": "bash",
+                "args": ["-lc", str(wrapper)],
+                "cwd": str(PROJECT_ROOT),
             }
         )
     ]
