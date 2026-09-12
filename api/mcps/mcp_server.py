@@ -14,8 +14,11 @@ def get_healthcare_mcp_servers() -> list[MCPServerStdio]:
     mcp_server_params = [
         MCPServerStdioParams(
             {
-                "command": "node",
-                "args": ["mcps/healthcare-mcp-public/server/index.js"],
+                # Use a small wrapper script that installs deps if missing,
+                # then launches the Node server. This keeps startup idempotent
+                # and avoids failures when node_modules is absent.
+                "command": str(ROOT_DIR / "scripts" / "mcp_start.sh"),
+                "args": [],
                 "cwd": str(ROOT_DIR),
             }
         )
