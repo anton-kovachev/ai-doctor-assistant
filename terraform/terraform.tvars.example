@@ -1,0 +1,24 @@
+# Example Terraform variables file
+# Copy this file to 'terraform/terraform.tvars' and fill in real values.
+# The real 'terraform/terraform.tvars' is gitignored to avoid committing secrets.
+
+next_public_clerk_publishable_key = "pk_test_REPLACE_ME"
+clerk_secret_key               = "sk_test_REPLACE_ME"
+clerk_jwks_url                 = "https://your-clerk-domain/.well-known/jwks.json"
+default_aws_region             = "eu-north-1"
+aws_account_id                 = "123456789012"
+openrouter_api_key             = "sk-or-REPLACE_ME"
+openrouter_base_url            = "https://api.openrouter.ai/v1"
+openai_api_key                 = "sk-REPLACE_ME"
+anthropic_base_url             = "https://api.anthropic.com/v1"
+anthropic_api_key              = "sk-anthropic-REPLACE_ME"
+email_smtp_server              = "smtp.example.com"
+email_app_password             = "REPLACE_WITH_APP_PASSWORD"
+email_address                  = "you@example.com"
+
+# Optional deployment settings
+project_name                   = "ai-doctor-assistant"
+aws_region                     = "eu-north-1"
+environment                    = "dev"
+ecr_repository_name            = "ecr-repository"
+app_dir                        = "../"
