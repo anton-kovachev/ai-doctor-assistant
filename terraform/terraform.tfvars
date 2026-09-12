@@ -28,7 +28,7 @@ environment = "dev"
 # Legacy plaintext secret variables left intentionally empty to avoid
 # forcing sensitive values in the repo. The deployment should use the
 # corresponding *_secret_name variables to fetch real secrets from AWS.
-openrouter_api_key = ""
-openai_api_key = ""
-anthropic_api_key = ""
-email_app_password = ""
+openrouter_api_key = "openrouter_api_key_secret"
+openai_api_key = "openai_api_key_secret"
+anthropic_api_key = "anthropic_api_key_secret"
+email_app_password = "email_app_password_secret"
