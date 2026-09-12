@@ -6,6 +6,7 @@ default_aws_region                = "eu-north-1"
 aws_account_id                    = "456097556049"
 api_throttle_burst_limit           = 10
 api_throttle_rate_limit              = 100
+github_repository = "anton-kovachev/ai-doctor-assistant"
 
 # Secrets should be stored in AWS Secrets Manager and referenced by name/ARN here.
 # Replace the example names with your secret names or ARNs. These values are safe
