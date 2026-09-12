@@ -18,3 +18,17 @@ anthropic_secret_name = "/ai-doctor-assistant/anthropic_api_key"
 email_smtp_server = "smtp.gmail.com"
 email_app_password_secret_name = "/ai-doctor-assistant/email_app_password"
 email_address = "akovachev7@gmail.com"
+
+# Sample placeholders for required variables that have no defaults.
+# These are intentionally non-secret values or empty strings so the file
+# can be committed safely. Replace them with Secrets Manager names or
+# real values in CI if needed.
+environment = "dev"
+
+# Legacy plaintext secret variables left intentionally empty to avoid
+# forcing sensitive values in the repo. The deployment should use the
+# corresponding *_secret_name variables to fetch real secrets from AWS.
+openrouter_api_key = ""
+openai_api_key = ""
+anthropic_api_key = ""
+email_app_password = ""
