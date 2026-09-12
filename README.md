@@ -95,6 +95,19 @@ Access the app at `http://localhost:8000/`.
 - The project reads multiple secrets via environment variables (Clerk keys, OpenAI/Anthropic keys, email credentials). A local `.env` is supported for development but avoid committing it.
 - Example variable names are shown in `terraform/variables.tf` and the example `.tvars` file.
 
+**Backend URL configuration**
+- The frontend reads `NEXT_PUBLIC_BACKEND_URL` at build/runtime to determine the API base URL used by client code.
+- Where to set it:
+	- Local dev: create `.env.local` or add to your `.env` (this repo ignores `.env`), e.g. `NEXT_PUBLIC_BACKEND_URL="http://localhost:8000"`.
+	- One-off dev run: `NEXT_PUBLIC_BACKEND_URL="http://localhost:8000" npm run dev`.
+	- Build (CI): set `NEXT_PUBLIC_BACKEND_URL` in your CI environment before `npm run build` so the value is inlined into the static build.
+	- Docker: container exposes the backend on port `8000`; map host ports via `-p HOST:8000` and point the frontend `NEXT_PUBLIC_BACKEND_URL` to the deployed backend URL.
+	- Terraform: example variable `next_public_backend_url` is in `terraform/terraform.tvars.example` — copy it into `terraform/terraform.tvars` and populate for each environment.
+
+**How it works**
+- `next.config.ts` reads `.env` at build time and exposes `NEXT_PUBLIC_BACKEND_URL` to client code. Client pages (e.g., `pages/product.tsx`) will use `process.env.NEXT_PUBLIC_BACKEND_URL` and fall back to a relative `/api/` path for same-origin deployments.
+
+
 **Changing the Service Port**
 - Locally, use `PORT` env or Next/uvicorn `-p/--port` flags. In Docker the container exposes port `8000` (FastAPI) by default. Map host ports with `-p HOST:8000` when running the container.
 
