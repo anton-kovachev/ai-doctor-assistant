@@ -86,22 +86,49 @@ resource "aws_lambda_function" "app_lambda" {
     package_type  = "Image"
     image_uri     = "${aws_ecr_repository.doctor_assistant_repo.repository_url}:${random_id.app_rand_tag.hex}"
     depends_on    = [aws_iam_role_policy_attachment.lambda_basic_execution, aws_iam_role_policy_attachment.lambda_bedrock, aws_iam_role_policy_attachment.lambda_s3, null_resource.build_and_push_app_image]
+    # Prefer referencing Secrets Manager secrets by name/ARN.
+    # Store secret values in AWS Secrets Manager and provide their names
+    # via the variables `openrouter_secret_name`, `openai_secret_name`,
+    # `anthropic_secret_name`, and `email_app_password_secret_name`.
+    # The Lambda will receive the secret ARNs as env vars; the app should
+    # fetch the secret values at runtime using the AWS SDK.
     environment {
         variables = {
             CLERK_SECRET_KEY = "${var.clerk_secret_key}"
             CLERK_JWKS_URL   = "${var.clerk_jwks_url}"
             DEFAULT_AWS_REGION = "${var.default_aws_region}"
             AWS_ACCOUNT_ID = "${var.aws_account_id}"
-            OPENROUTER_API_KEY = "${var.openrouter_api_key}"
             OPENROUTER_BASE_URL = "${var.openrouter_base_url}"
-            OPENAI_API_KEY = "${var.openai_api_key}"
+            OPENROUTER_API_KEY_SECRET_ARN = "${data.aws_secretsmanager_secret.openrouter.arn}"
+            OPENAI_API_KEY_SECRET_ARN = "${data.aws_secretsmanager_secret.openai.arn}"
             ANTHROPIC_BASE_URL = "${var.anthropic_base_url}"
-            ANTHROPIC_API_KEY = "${var.anthropic_api_key}"
+            ANTHROPIC_API_KEY_SECRET_ARN = "${data.aws_secretsmanager_secret.anthropic.arn}"
             EMAIL_SMTP_SERVER = "${var.email_smtp_server}"
-            EMAIL_APP_PASSWORD = "${var.email_app_password}"
+            EMAIL_APP_PASSWORD_SECRET_ARN = "${data.aws_secretsmanager_secret.email_password.arn}"
             EMAIL_ADDRESS = "${var.email_address}"
         }
     }
+}
+
+# Look up secret ARNs from Secrets Manager. These data sources expect the
+# secret name (or ARN) to be provided via the new variables defined in
+# terraform/variables.tf. If the variable is empty, the data lookup will
+# error — set the variable in your CI or tfvars to the secret name instead
+# of the secret value.
+data "aws_secretsmanager_secret" "openrouter" {
+  name = var.openrouter_secret_name
+}
+
+data "aws_secretsmanager_secret" "openai" {
+  name = var.openai_secret_name
+}
+
+data "aws_secretsmanager_secret" "anthropic" {
+  name = var.anthropic_secret_name
+}
+
+data "aws_secretsmanager_secret" "email_password" {
+  name = var.email_app_password_secret_name
 }
 
 resource "aws_lambda_function_url" "app_lambda_url" {

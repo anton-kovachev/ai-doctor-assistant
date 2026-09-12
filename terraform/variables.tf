@@ -110,3 +110,42 @@ variable "app_dir" {
     type        = string
     default     = "../"
 }
+
+# Instead of providing secret values directly, provide the
+# Secrets Manager secret *names* (or ARNs) so Terraform can reference
+# the secret without storing the secret value in tfvars or state.
+variable "openrouter_secret_name" {
+  type        = string
+  description = "Secrets Manager name or ARN for the OpenRouter API key (e.g. /myproject/openrouter)"
+  default     = ""
+}
+
+variable "openai_secret_name" {
+  type        = string
+  description = "Secrets Manager name or ARN for the OpenAI API key"
+  default     = ""
+}
+
+variable "anthropic_secret_name" {
+  type        = string
+  description = "Secrets Manager name or ARN for the Anthropic API key"
+  default     = ""
+}
+
+variable "email_app_password_secret_name" {
+  type        = string
+  description = "Secrets Manager name or ARN for the SMTP app password"
+  default     = ""
+}
+
+variable "api_throttle_burst_limit" {
+  description = "API Gateway throttle burst limit"
+  type        = number
+  default     = 10
+}
+
+variable "api_throttle_rate_limit" {
+  description = "API Gateway throttle rate limit"
+  type        = number
+  default     = 100
+}
