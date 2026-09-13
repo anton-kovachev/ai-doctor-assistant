@@ -109,7 +109,7 @@
 # }
 
 # # Custom policy for additional permissions
-# resource "aws_iam_role_policy" "github_additional" {
+#   resource "aws_iam_role_policy" "github_additional" {
 #   name = "github-actions-additional"
 #   role = aws_iam_role.github_actions.id
 
