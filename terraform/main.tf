@@ -15,6 +15,7 @@ locals {
 resource "aws_ecr_repository" "doctor_assistant_repo" {
     name                 = "${local.name_prefix}-${var.ecr_repository_name}"
     image_tag_mutability = "MUTABLE"
+    force_delete         = true
     image_scanning_configuration {
         scan_on_push = true
     }

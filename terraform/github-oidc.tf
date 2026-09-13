@@ -135,7 +135,17 @@
 #           "iam:UntagRole",
 #           "iam:ListInstanceProfilesForRole",
 #           "sts:GetCallerIdentity",
-#           "ecr:GetAuthorizationToken"
+#           "ecr:GetAuthorizationToken",
+#           "ecr:CreateRepository",
+#           "ecr:DescribeRepositories",
+#           "ecr:BatchCheckLayerAvailability",
+#           "ecr:InitiateLayerUpload",
+#           "ecr:UploadLayerPart",
+#           "ecr:CompleteLayerUpload",
+#           "ecr:PutImage",
+#           "ecr:DescribeImages",
+#           "ecr:ListTagsForResource",
+#           "ecr:DeleteRepository"
 #         ]
 #         Resource = "*"
 #       },
