@@ -103,6 +103,11 @@ resource "aws_iam_role_policy_attachment" "github_route53" {
   role       = aws_iam_role.github_actions.name
 }
 
+resource "aws_iam_role_policy_attachment" "github_read_secrets" {
+  policy_arn = "arn:aws:iam::aws:policy/AWSSecretsManagerClientReadOnlyAccess"
+  role       = aws_iam_role.github_actions.name
+}
+
 # Custom policy for additional permissions
 resource "aws_iam_role_policy" "github_additional" {
   name = "github-actions-additional"
