@@ -9,7 +9,7 @@ cd "$TERRAFORM_DIR"
 
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 AWS_REGION=${DEFAULT_AWS_REGION:-eu-north-1}
-terraform init -input=false \
+terraform init -input=false input=false -migrate-state -reconfigure \
   -backend-config="bucket=ai-doctor-assistant-dev-terraform-state-${AWS_ACCOUNT_ID}" \
   -backend-config="key=${ENVIRONMENT}/terraform.tfstate" \
   -backend-config="region=${AWS_REGION}" \

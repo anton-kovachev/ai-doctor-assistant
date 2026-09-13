@@ -22,7 +22,7 @@ echo "📦 Emptying ECR..."
 
 # Get AWS Account ID for bucket names
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-ECR_REPO="ai-doctor-assistant-dev-ecr-repository"
+ECR_REPO="ai-doctor-assistant-{$ENVIRONMENT}-ecr-repository"
 
 aws ecr list-images --repository-name "$ECR_REPO" --query 'imageIds[*].imageDigest' --output text | tr '\t' '\n' | sed 's/^/imageDigest=/' | xargs --no-run-if-empty aws ecr batch-delete-image --repository-name "$ECR_REPO" --image-ids
 
