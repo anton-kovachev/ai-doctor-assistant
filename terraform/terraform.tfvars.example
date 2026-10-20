@@ -7,6 +7,8 @@ clerk_secret_key               = "sk_test_REPLACE_ME"
 clerk_jwks_url                 = "https://your-clerk-domain/.well-known/jwks.json"
 default_aws_region             = "eu-north-1"
 aws_account_id                 = "123456789012"
+project_id                     = "proj_REPLACE_ME"
+aws_bedrock_base_url           = "https://bedrock-mantle.eu-north-1.api.aws/v1"
 openrouter_api_key             = "sk-or-REPLACE_ME"
 openrouter_base_url            = "https://api.openrouter.ai/v1"
 openai_api_key                 = "sk-REPLACE_ME"
@@ -15,11 +17,6 @@ anthropic_api_key              = "sk-anthropic-REPLACE_ME"
 email_smtp_server              = "smtp.example.com"
 email_app_password             = "REPLACE_WITH_APP_PASSWORD"
 email_address                  = "you@example.com"
-
-# Frontend configuration
-# This value will be injected into the Next.js build as `NEXT_PUBLIC_BACKEND_URL`
-# e.g. "http://localhost:8000" for local Docker / dev
-next_public_backend_url        = "http://localhost:8000"
 
 # Optional deployment settings
 project_name                   = "ai-doctor-assistant"

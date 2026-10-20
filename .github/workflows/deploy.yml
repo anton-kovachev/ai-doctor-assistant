@@ -56,7 +56,7 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Run Deployment Script
         run: |
@@ -76,10 +76,12 @@ jobs:
         run: |
           terraform workspace select ${{ github.event.inputs.environment || 'dev' }}
           echo "api_gateway_url=$(terraform output -raw api_gateway_url)" >> $GITHUB_OUTPUT
+          echo "frontend_website_url=$(terraform output -raw frontend_website_url)" >> $GITHUB_OUTPUT
 
 
       - name: Deployment Summary
         run: |
           echo "✅ Deployment Complete!"
           echo "📡 API GATEWAY: ${{ steps.deploy_outputs.outputs.api_gateway_url }}"
+          echo "🌐 Frontend: ${{ steps.deploy_outputs.outputs.frontend_website_url }}"
           echo "🖼️ ECR Repository: ${{ steps.deploy_outputs.outputs.ecr_repository_url }}"

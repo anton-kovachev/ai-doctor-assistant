@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 openai
+aws-bedrock-token-generator
 dotenv
 fastapi-clerk-auth
 pydantic

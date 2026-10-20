@@ -1,13 +1,12 @@
 # Architecture Overview
 
-This project uses a simple two-tier architecture packaged into a single container for convenient deployment.
+The frontend and backend are built and deployed independently.
 
-- Frontend: Next.js app is statically exported (`next export`/`npm run build`) and placed in `./static` during the Docker build.
-- Backend: FastAPI serves API endpoints and the static frontend; Uvicorn listens on port 8000.
-- Container: Docker multi-stage build compiles the frontend and installs Python deps in a smaller runtime image.
-- Infrastructure: Terraform manages cloud resources and secrets should be supplied at runtime via `terraform.tvars` or a secret manager.
+- Frontend: The Next.js Pages Router app in `frontend/` is statically exported to `frontend/out/` and uploaded to a public S3 website bucket.
+- Backend: The FastAPI app in `backend/api/` runs in a Python container and serves API requests through API Gateway and Lambda.
+- Infrastructure: Terraform provisions the API, container registry, Lambda resources, and frontend hosting bucket.
 
-Flow:
-1. Developer builds the Next app and the Docker image.
-2. The container serves static frontend assets and responds to API calls on the same port.
-3. Terraform provisions cloud infra (ECR, compute, networking).
+Deployment flow:
+1. Terraform builds and pushes the backend container image, then applies the API and hosting infrastructure.
+2. The deploy script builds the frontend with the deployed API Gateway URL.
+3. The generated static assets are synced to the Terraform-managed S3 bucket.

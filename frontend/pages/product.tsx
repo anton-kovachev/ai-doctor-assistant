@@ -20,13 +20,14 @@ function ConsultationForm() {
 
   // Streaming state
   const [output, setOutput] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setOutput("");
+    setErrorMessage("");
     setLoading(true);
-    debugger;
     const jwt = await getToken({
       template: "test_jwt_template",
       skipCache: true,
@@ -65,6 +66,26 @@ function ConsultationForm() {
         }
       },
       async onmessage(ev) {
+        if (ev.event === "error") {
+          let message = "We couldn’t validate your consultation notes. Please try again.";
+          try {
+            const payload: unknown = JSON.parse(ev.data);
+            if (
+              typeof payload === "object" &&
+              payload !== null &&
+              "message" in payload &&
+              typeof payload.message === "string"
+            ) {
+              message = payload.message;
+            }
+          } catch {
+            message = "We couldn’t validate your consultation notes. Please try again.";
+          }
+          setErrorMessage(message);
+          setLoading(false);
+          controller.abort();
+          return;
+        }
         buffer += ev.data;
         setOutput(buffer);
       },
@@ -155,11 +176,30 @@ function ConsultationForm() {
             required
             rows={8}
             value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            onChange={(e) => {
+              setNotes(e.target.value);
+              setErrorMessage("");
+            }}
+            aria-describedby="notes-word-count"
             className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
             placeholder="Enter detailed consultation notes..."
           />
+          <p
+            id="notes-word-count"
+            className="text-sm text-gray-500 dark:text-gray-400"
+          >
+            {notes.trim() ? notes.trim().split(/\s+/).length : 0} / 500 words
+          </p>
         </div>
+
+        {errorMessage && (
+          <p
+            role="alert"
+            className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300"
+          >
+            {errorMessage}
+          </p>
+        )}
 
         <button
           type="submit"

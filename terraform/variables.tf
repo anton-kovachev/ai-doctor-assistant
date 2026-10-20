@@ -27,6 +27,16 @@ variable "aws_account_id" {
   description = "AWS_ACCOUNT_ID from .env"
 }
 
+variable "project_id" {
+  type        = string
+  description = "PROJECT_ID for the Bedrock Mantle project"
+}
+
+variable "aws_bedrock_base_url" {
+  type        = string
+  description = "AWS_BEDROCK_BASE_URL for the Bedrock Mantle OpenAI-compatible API"
+}
+
 variable "openrouter_api_key" {
   type        = string
   description = "OPENROUTER_API_KEY from .env"
@@ -71,13 +81,13 @@ variable "email_address" {
   description = "EMAIL_ADDRESS from .env"
 }
 variable "project_name" {
-    description = "Name prefix for all resources"
-    type        = string
-      validation {
+  description = "Name prefix for all resources"
+  type        = string
+  validation {
     condition     = can(regex("^[a-z0-9-]+$", var.project_name))
     error_message = "Project name must contain only lowercase letters, numbers, and hyphens."
   }
-  default     = "ai-doctor-assistant"
+  default = "ai-doctor-assistant"
 }
 
 variable "aws_region" {
@@ -106,9 +116,9 @@ variable "ecr_repository_name" {
 }
 
 variable "app_dir" {
-    description = "Directory of the application"
-    type        = string
-    default     = "../"
+  description = "Directory of the application"
+  type        = string
+  default     = "../"
 }
 
 # Instead of providing secret values directly, provide the
