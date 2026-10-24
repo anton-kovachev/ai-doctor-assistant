@@ -1,6 +1,6 @@
 "use client";
-
-import { useState, FormEvent } from "react";
+import { v4 as uuidv4 } from "uuid";
+import { useState, useEffect, useRef, FormEvent } from "react";
 import { useAuth } from "@clerk/nextjs";
 import DatePicker from "react-datepicker";
 import ReactMarkdown from "react-markdown";
@@ -10,7 +10,12 @@ import { fetchEventSource } from "@microsoft/fetch-event-source";
 import { Protect, PricingTable, UserButton } from "@clerk/nextjs";
 
 function ConsultationForm() {
-  const { getToken } = useAuth();
+  const { getToken, userId } = useAuth();
+  const consultationIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    consultationIdRef.current = uuidv4();
+  }, []);
 
   // Form state
   const [patientName, setPatientName] = useState("");
@@ -53,6 +58,7 @@ function ConsultationForm() {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${jwt}`,
+        "Session-Id": consultationIdRef.current || "",
       },
       body: JSON.stringify({
         patient_name: patientName,
@@ -67,7 +73,8 @@ function ConsultationForm() {
       },
       async onmessage(ev) {
         if (ev.event === "error") {
-          let message = "We couldn’t validate your consultation notes. Please try again.";
+          let message =
+            "We couldn’t validate your consultation notes. Please try again.";
           try {
             const payload: unknown = JSON.parse(ev.data);
             if (
@@ -79,7 +86,8 @@ function ConsultationForm() {
               message = payload.message;
             }
           } catch {
-            message = "We couldn’t validate your consultation notes. Please try again.";
+            message =
+              "We couldn’t validate your consultation notes. Please try again.";
           }
           setErrorMessage(message);
           setLoading(false);
@@ -99,6 +107,93 @@ function ConsultationForm() {
       },
     });
   }
+
+  //   await fetchEventSource(consultationUrl, {
+  //     signal: controller.signal,
+  //     openWhenHidden: true,
+  //     method: "POST",
+  //     headers: {
+  //       "Content-Type": "application/json",
+  //       Authorization: `Bearer ${jwt}`,
+  //       "Session-Id": consultationIdRef.current || "",
+  //     },
+  //     body: JSON.stringify({
+  //       patient_name: patientName,
+  //       patient_email: patientEmail,
+  //       date_of_visit: visitDate?.toISOString().slice(0, 10),
+  //       notes,
+  //     }),
+  //     fetch: async (input, init) => {
+  //       let response = await fetch(input, {
+  //         ...init,
+  //         headers: {
+  //           ...(init?.headers || {}),
+  //           Authorization: `Bearer ${jwt}`,
+  //         },
+  //       });
+  //       if (response.status == 401 || response.status == 403) {
+  //         // Handle unauthorized or forbidden response
+  //         console.error("Unauthorized or forbidden request");
+  //         const jwt = await getToken({
+  //           template: "test_jwt_template",
+  //           skipCache: true,
+  //         });
+
+  //         //Retry with a fresh token
+  //         response = await fetch(input, {
+  //           ...init,
+  //           headers: {
+  //             ...(init?.headers || {}),
+  //             Authorization: `Bearer ${jwt}`,
+  //           },
+  //         });
+  //       }
+
+  //       return response;
+  //     },
+  //     onopen: async (response) => {
+  //       if (response.status >= 400) {
+  //         throw new Error(`Failed to connect: ${response.statusText}`);
+  //       }
+  //     },
+  //     onmessage: async (ev) => {
+  //       if (ev.event === "error") {
+  //         let message =
+  //           "We couldn’t validate your consultation notes. Please try again.";
+  //         try {
+  //           const payload: unknown = JSON.parse(ev.data);
+  //           if (
+  //             typeof payload === "object" &&
+  //             payload !== null &&
+  //             "message" in payload &&
+  //             typeof payload.message === "string"
+  //           ) {
+  //             message = payload.message;
+  //           }
+  //         } catch {
+  //           message =
+  //             "We couldn’t validate your consultation notes. Please try again.";
+  //         }
+  //         setErrorMessage(message);
+  //         setLoading(false);
+  //         controller.abort();
+  //         return;
+  //       }
+  //       buffer += ev.data;
+  //       setOutput(buffer);
+  //     },
+  //     onclose: () => {
+  //       debugger;
+  //       setLoading(false);
+  //     },
+  //     onerror: (err) => {
+  //       debugger;
+  //       console.error("SSE error:", err);
+  //       controller.abort();
+  //       setLoading(false);
+  //     },
+  //   });
+  // }
 
   return (
     <div className="container mx-auto px-4 py-12 max-w-3xl">

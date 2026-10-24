@@ -8,7 +8,7 @@ if not os.getenv("AWS_LAMBDA_FUNCTION_NAME") and not os.getenv(
 ):
     load_dotenv(dotenv_path=Path(__file__).with_name(".env.local"))
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi_clerk_auth import (
@@ -27,6 +27,8 @@ from agents import (
     OpenAIChatCompletionsModel,
     Runner,
     RunContextWrapper,
+    SQLiteSession,
+    RunConfig,
     input_guardrail,
     trace,
 )
@@ -38,6 +40,9 @@ from typing import cast
 
 from tools.email_tools import send_prescription_email
 from mcps import get_healthcare_mcp_servers
+import uuid
+from utils import keep_recent_history
+from agents.extensions.memory import RedisSession
 
 MAX_NOTEST_LENGTH = 500
 
@@ -50,8 +55,10 @@ async def lifespan(app: FastAPI):
             for server in get_healthcare_mcp_servers()
         ]
         app.state.healthcare_servers = healthcare_servers
-        yield
-        del app.state.healthcare_servers
+        try:
+            yield
+        finally:
+            del app.state.healthcare_servers
 
 
 app = FastAPI(lifespan=lifespan)
@@ -125,6 +132,7 @@ Notes:
 @app.post("/api/consultation", response_class=StreamingResponse)
 async def consultation_summary(
     visit: Visit,
+    session_id: str = Header(default=str(uuid.uuid4()), alias="Session-Id"),
     creds: HTTPAuthorizationCredentials = Depends(clerk_guard),
 ):
     with trace("Consultation Summary"):
@@ -146,6 +154,10 @@ async def consultation_summary(
         )
 
         async def event_stream():
+            redis_session = RedisSession.from_url(
+                f"{user_id}_{session_id}",
+                url=os.getenv("REDIS_URL", default="redis://localhost:6379"),
+            )
             doctor_agent = Agent(
                 name="Doctor",
                 model=model,
@@ -161,9 +173,12 @@ async def consultation_summary(
                 input=user_prompt,
                 context=visit,
                 max_turns=5,
+                session=redis_session,
+                run_config=RunConfig(session_input_callback=keep_recent_history),
             )
             try:
                 async for stream_event in stream.stream_events():
+                    print(f"Stream event: {stream_event}")
                     if stream_event.type == "raw_response_event" and isinstance(
                         stream_event.data, ResponseTextDeltaEvent
                     ):
@@ -174,11 +189,20 @@ async def consultation_summary(
                                 yield f"data: {line}\n\n"
                                 yield "data:  \n"
                             yield f"data: {lines[-1]}\n\n"
+
+                # if stream.interruptions:
+                #     state = stream.to_state()
+                #     interruptions = state.get_interruptions()
+                #     print(f"Current state: {state}")
+                #     print(f"Interruptions: {interruptions}")
+
             except InputGuardrailTripwireTriggered as exc:
                 message = exc.guardrail_result.output.output_info
                 if not isinstance(message, str):
                     raise
                 yield f"event: error\ndata: {json.dumps({'message': message})}\n\n"
+
+            await redis_session.close()
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 

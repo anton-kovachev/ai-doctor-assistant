@@ -9,8 +9,7 @@ EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER")
 EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
 
 
-
-@function_tool
+@function_tool(needs_approval=True)
 def send_prescription_email(
     to_email: str,
     subject: str,
