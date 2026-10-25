@@ -159,3 +159,21 @@ variable "api_throttle_rate_limit" {
   type        = number
   default     = 100
 }
+
+variable "redis_node_type" {
+  description = "ElastiCache node type for the Redis instance"
+  type        = string
+  default     = "cache.t3.micro"
+}
+
+variable "redis_port" {
+  description = "Port used by the Redis instance"
+  type        = number
+  default     = 6379
+}
+
+variable "redis_lambda_subnet_cidr" {
+  description = "Unused CIDR pool inside the default VPC, split into one private subnet per environment"
+  type        = string
+  default     = "172.31.240.0/24"
+}

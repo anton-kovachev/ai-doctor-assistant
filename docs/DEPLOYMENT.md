@@ -14,6 +14,8 @@ This file documents steps and recommendations to deploy the application.
 
 3. Terraform infra
    - Deploy the API, build the frontend with its API URL, and upload it to S3: `./scripts/deploy.sh dev`
+   - Each environment provisions a single-node ElastiCache Redis instance in the default VPC and connects the Lambda through a private subnet. A NAT Gateway provides outbound internet access for the Lambda; NAT Gateway hourly and data-processing charges apply for each environment.
+   - Set `redis_lambda_subnet_cidr` to an unused CIDR pool inside the default VPC if the example range overlaps an existing subnet. Terraform splits the pool into a separate private subnet for each environment.
    - Terraform provisions the public S3 website bucket and API infrastructure.
 
 4. CI/CD

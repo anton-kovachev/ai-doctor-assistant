@@ -24,3 +24,6 @@ aws_region                     = "eu-north-1"
 environment                    = "dev"
 ecr_repository_name            = "ecr-repository"
 app_dir                        = "../"
+redis_lambda_subnet_cidr       = "172.31.240.0/24" # Split into separate /26 subnets per environment
+redis_node_type                = "cache.t3.micro"
+redis_port                     = 6379

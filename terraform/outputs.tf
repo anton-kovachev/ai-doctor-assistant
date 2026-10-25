@@ -28,3 +28,8 @@ output "frontend_clerk_publishable_key" {
   value       = var.next_public_clerk_publishable_key
   sensitive   = true
 }
+
+output "redis_primary_endpoint" {
+  description = "ElastiCache primary endpoint for the selected environment"
+  value       = aws_elasticache_replication_group.redis.primary_endpoint_address
+}

@@ -1,13 +1,49 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, useEffect, useRef, FormEvent } from "react";
 import { useAuth } from "@clerk/nextjs";
 import DatePicker from "react-datepicker";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkBreaks from "remark-breaks";
-import { fetchEventSource } from "@microsoft/fetch-event-source";
-import { Protect, PricingTable, UserButton } from "@clerk/nextjs";
+import ConsultationResultModal from "../components/ConsultationResultModal";
+import {
+  Protect,
+  PricingTable,
+  SignInButton,
+  SignedIn,
+  SignedOut,
+  UserButton,
+} from "@clerk/nextjs";
+import { ConsulationRequest } from "../models/consulation";
+import { ConfirmationRequest } from "../models/confirmation";
+import { fetchEventStream } from "../utils/fetchEventStream";
+import { EmailPrescriptionConfirmationRequest } from "../models/confirmation";
+
+const BASE_API_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(
+  /\/$/,
+  "",
+);
+
+function isEmailPrescriptionConfirmationRequest(
+  value: unknown,
+): value is EmailPrescriptionConfirmationRequest {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "to_email" in value &&
+    typeof value.to_email === "string" &&
+    "subject" in value &&
+    typeof value.subject === "string" &&
+    "text_body" in value &&
+    typeof value.text_body === "string" &&
+    "html_body" in value &&
+    typeof value.html_body === "string"
+  );
+}
+
+function parseHtml(html: string): string {
+  return (
+    new DOMParser().parseFromString(html, "text/html").body.textContent ?? ""
+  );
+}
 
 function ConsultationForm() {
   const { getToken } = useAuth();
@@ -22,204 +58,317 @@ function ConsultationForm() {
   const [output, setOutput] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [activity, setActivity] = useState<string[]>([]);
+  const [interruptions, setInterruptions] = useState<string[]>([]);
+  const sessionId = useRef<string | null>(null);
+
+  useEffect(() => {
+    sessionId.current = crypto.randomUUID();
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setOutput("");
     setErrorMessage("");
+    setActivity([]);
+    setInterruptions([]);
     setLoading(true);
-    const jwt = await getToken({
-      template: "test_jwt_template",
-      skipCache: true,
-    });
-    if (!jwt) {
-      setOutput("Authentication required");
-      setLoading(false);
-      return;
-    }
+    setModalOpen(true);
 
-    const controller = new AbortController();
-    let buffer = "";
+    await fetchConsultation();
+  }
 
-    const rawBase = process.env.NEXT_PUBLIC_BACKEND_URL || "";
-    const base = rawBase.replace(/\/$/, "");
-    const consultationUrl = base
-      ? `${base}/api/consultation`
+  async function fetchConsultation() {
+    const consultationUrl = BASE_API_URL
+      ? `${BASE_API_URL}/api/consultation`
       : `/api/consultation`;
+    const body: ConsulationRequest = {
+      patient_name: patientName,
+      patient_email: patientEmail,
+      date_of_visit: visitDate?.toISOString().slice(0, 10) ?? "",
+      notes,
+    };
 
-    await fetchEventSource(consultationUrl, {
-      signal: controller.signal,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${jwt}`,
-      },
-      body: JSON.stringify({
-        patient_name: patientName,
-        patient_email: patientEmail,
-        date_of_visit: visitDate?.toISOString().slice(0, 10),
-        notes,
-      }),
-      async onopen(response) {
-        if (response.status >= 400) {
-          throw new Error(`Failed to connect: ${response.statusText}`);
-        }
-      },
-      async onmessage(ev) {
-        if (ev.event === "error") {
-          let message = "We couldn’t validate your consultation notes. Please try again.";
-          try {
-            const payload: unknown = JSON.parse(ev.data);
-            if (
-              typeof payload === "object" &&
-              payload !== null &&
-              "message" in payload &&
-              typeof payload.message === "string"
-            ) {
-              message = payload.message;
+    try {
+      await fetchEventStream(
+        consultationUrl,
+        body,
+        setOutput,
+        () =>
+          getToken({
+            template: "test_jwt_template",
+            skipCache: true,
+          }),
+        {
+          sessionId: sessionId.current,
+          onOpen: () => setErrorMessage(""),
+          onClose: () => setLoading(false),
+          onMessage(ev, abort) {
+            console.log(
+              `Event received: event:${ev.event} data: ${ev.data} id: ${ev.id}`,
+            );
+            if (ev.event === "progress") {
+              setActivity((current) => [...current, ev.data].slice(-5));
+              return true;
             }
-          } catch {
-            message = "We couldn’t validate your consultation notes. Please try again.";
-          }
-          setErrorMessage(message);
-          setLoading(false);
-          controller.abort();
-          return;
-        }
-        buffer += ev.data;
-        setOutput(buffer);
-      },
-      onclose() {
-        setLoading(false);
-      },
-      onerror(err) {
-        console.error("SSE error:", err);
-        controller.abort();
-        setLoading(false);
-      },
+            if (ev.event === "interruption") {
+              let payload: unknown;
+              try {
+                payload = JSON.parse(ev.data);
+              } catch (error) {
+                if (!(error instanceof SyntaxError)) {
+                  throw error;
+                }
+                console.error("Invalid interruption event payload:", error);
+                setErrorMessage(
+                  "Could not read the approval request from the server.",
+                );
+                return true;
+              }
+              if (
+                typeof payload !== "object" ||
+                payload === null ||
+                !("pending_action" in payload) ||
+                typeof payload.pending_action !== "string"
+              ) {
+                setErrorMessage("The server sent an invalid approval request.");
+                return true;
+              }
+              const actionName = payload.pending_action;
+
+              if (
+                "arguments" in payload &&
+                isEmailPrescriptionConfirmationRequest(payload.arguments)
+              ) {
+                setOutput(
+                  `##${payload.arguments.subject}\n${payload.arguments.text_body || parseHtml(payload.arguments.html_body)}`,
+                );
+              }
+
+              setInterruptions((current) => [...current, actionName]);
+              return true;
+            }
+            if (ev.event === "error") {
+              let message =
+                "We couldn’t validate your consultation notes. Please try again.";
+              try {
+                const payload: unknown = JSON.parse(ev.data);
+                if (
+                  typeof payload === "object" &&
+                  payload !== null &&
+                  "message" in payload &&
+                  typeof payload.message === "string"
+                ) {
+                  message = payload.message;
+                }
+              } catch {
+                message =
+                  "We couldn’t validate your consultation notes. Please try again.";
+              }
+              setErrorMessage(message);
+              setLoading(false);
+              abort();
+              return true;
+            }
+            return false;
+          },
+          onTransportError(err) {
+            setErrorMessage(
+              "An error occurred while streaming the consultation. Retrying...",
+            );
+            console.error("SSE error:", err);
+            return 1000;
+          },
+        },
+      );
+    } catch (error) {
+      console.error("Consultation stream failed:", error);
+      setErrorMessage(
+        error instanceof Error ? error.message : "Authentication required",
+      );
+      setLoading(false);
+    }
+  }
+
+  async function handleApproveInterruptions() {
+    console.info(
+      "Approve interruptions (frontend placeholder):",
+      interruptions,
+    );
+    await handleConfirmInterruptions(true);
+  }
+
+  async function handleRejectInterruptions() {
+    console.info("Reject interruptions (frontend placeholder):", interruptions);
+    setLoading(true);
+    try {
+      await handleConfirmInterruptions(false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleConfirmInterruptions(approved: boolean) {
+    console.info(
+      "Confirm interruptions (frontend placeholder):",
+      interruptions,
+    );
+    setOutput("");
+    await submitConfirmation({
+      actions: interruptions.map((action) => ({
+        action_name: action,
+        is_approved: approved,
+      })),
     });
+    setInterruptions([]);
+  }
+
+  async function submitConfirmation(request: ConfirmationRequest) {
+    const confirmationUrl = BASE_API_URL
+      ? `${BASE_API_URL}/api/confirmation`
+      : `/api/confirmation`;
+    try {
+      await fetchEventStream(
+        confirmationUrl,
+        request,
+        setOutput,
+        () =>
+          getToken({
+            template: "test_jwt_template",
+            skipCache: true,
+          }),
+        { sessionId: sessionId.current },
+      );
+    } catch (error) {
+      console.error("Confirmation stream failed:", error);
+      setErrorMessage(
+        error instanceof Error ? error.message : "Authentication required",
+      );
+      setLoading(false);
+    }
   }
 
   return (
-    <div className="container mx-auto px-4 py-12 max-w-3xl">
-      <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-8">
-        AI Dr.
-      </h1>
+    <>
+      <SignedIn>
+        <div className="container mx-auto px-4 py-12 max-w-3xl">
+          <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-8">
+            AI Dr.
+          </h1>
 
-      <form
-        onSubmit={handleSubmit}
-        className="space-y-6 bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8"
-      >
-        <div className="space-y-2">
-          <label
-            htmlFor="patient"
-            className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-6 bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8"
           >
-            Patient Name
-          </label>
-          <input
-            id="patient"
-            type="text"
-            required
-            value={patientName}
-            onChange={(e) => setPatientName(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-            placeholder="Enter patient's full name"
-          />
+            <div className="space-y-2">
+              <label
+                htmlFor="patient"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+              >
+                Patient Name
+              </label>
+              <input
+                id="patient"
+                type="text"
+                required
+                value={patientName}
+                onChange={(e) => setPatientName(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                placeholder="Enter patient's full name"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+              >
+                Patient Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                required
+                value={patientEmail}
+                onChange={(e) => setPatientEmail(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                placeholder="Enter patient's email address"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label
+                htmlFor="date"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+              >
+                Date of Visit
+              </label>
+              <DatePicker
+                id="date"
+                selected={visitDate}
+                onChange={(d: Date | null) => setVisitDate(d)}
+                dateFormat="yyyy-MM-dd"
+                placeholderText="Select date"
+                required
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label
+                htmlFor="notes"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+              >
+                Complain
+              </label>
+              <textarea
+                id="notes"
+                required
+                rows={8}
+                value={notes}
+                onChange={(e) => {
+                  setNotes(e.target.value);
+                  setErrorMessage("");
+                }}
+                aria-describedby="notes-word-count"
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                placeholder="Enter detailed consultation notes..."
+              />
+              <p
+                id="notes-word-count"
+                className="text-sm text-gray-500 dark:text-gray-400"
+              >
+                {notes.trim() ? notes.trim().split(/\s+/).length : 0} / 500
+                words
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-200"
+            >
+              {loading ? "Generating Prescription..." : "Generate Prescription"}
+            </button>
+          </form>
         </div>
-
-        <div className="space-y-2">
-          <label
-            htmlFor="email"
-            className="block text-sm font-medium text-gray-700 dark:text-gray-300"
-          >
-            Patient Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            required
-            value={patientEmail}
-            onChange={(e) => setPatientEmail(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-            placeholder="Enter patient's email address"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label
-            htmlFor="date"
-            className="block text-sm font-medium text-gray-700 dark:text-gray-300"
-          >
-            Date of Visit
-          </label>
-          <DatePicker
-            id="date"
-            selected={visitDate}
-            onChange={(d: Date | null) => setVisitDate(d)}
-            dateFormat="yyyy-MM-dd"
-            placeholderText="Select date"
-            required
-            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label
-            htmlFor="notes"
-            className="block text-sm font-medium text-gray-700 dark:text-gray-300"
-          >
-            Complain
-          </label>
-          <textarea
-            id="notes"
-            required
-            rows={8}
-            value={notes}
-            onChange={(e) => {
-              setNotes(e.target.value);
-              setErrorMessage("");
-            }}
-            aria-describedby="notes-word-count"
-            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-            placeholder="Enter detailed consultation notes..."
-          />
-          <p
-            id="notes-word-count"
-            className="text-sm text-gray-500 dark:text-gray-400"
-          >
-            {notes.trim() ? notes.trim().split(/\s+/).length : 0} / 500 words
-          </p>
-        </div>
-
-        {errorMessage && (
-          <p
-            role="alert"
-            className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300"
-          >
-            {errorMessage}
-          </p>
-        )}
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-200"
-        >
-          {loading ? "Generating Prescription..." : "Generate Prescription"}
-        </button>
-      </form>
-
-      {output && (
-        <section className="mt-8 bg-gray-50 dark:bg-gray-800 rounded-xl shadow-lg p-8">
-          <div className="markdown-content prose prose-blue dark:prose-invert max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
-              {output}
-            </ReactMarkdown>
-          </div>
-        </section>
-      )}
-    </div>
+        <ConsultationResultModal
+          activity={activity}
+          errorMessage={errorMessage}
+          interruptions={interruptions}
+          loading={loading}
+          onApprove={handleApproveInterruptions}
+          onClose={() => setModalOpen(false)}
+          onReject={handleRejectInterruptions}
+          open={modalOpen}
+          output={output}
+        />
+      </SignedIn>
+      <SignedOut>
+        <SignInButton />
+      </SignedOut>
+    </>
   );
 }
 

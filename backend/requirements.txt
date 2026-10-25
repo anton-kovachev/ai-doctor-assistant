@@ -6,3 +6,4 @@ dotenv
 fastapi-clerk-auth
 pydantic
 openai-agents
+redis

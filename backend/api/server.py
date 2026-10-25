@@ -8,7 +8,7 @@ if not os.getenv("AWS_LAMBDA_FUNCTION_NAME") and not os.getenv(
 ):
     load_dotenv(dotenv_path=Path(__file__).with_name(".env.local"))
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi_clerk_auth import (
@@ -16,30 +16,27 @@ from fastapi_clerk_auth import (
     ClerkHTTPBearer,
     HTTPAuthorizationCredentials,
 )
-from aws_bedrock_token_generator import provide_token
-from openai import AsyncOpenAI
-from pydantic import BaseModel
 
 from agents import (
-    Agent,
-    GuardrailFunctionOutput,
-    InputGuardrailTripwireTriggered,
-    OpenAIChatCompletionsModel,
     Runner,
-    RunContextWrapper,
-    input_guardrail,
+    RunState,
     trace,
 )
 from agents.items import TResponseInputItem
-from openai.types.responses import ResponseTextDeltaEvent
+from agents.extensions.memory import RedisSession
 from contextlib import AsyncExitStack, asynccontextmanager
-from agents.mcp import MCPServer
-from typing import cast
 
 from tools.email_tools import send_prescription_email
 from mcps import get_healthcare_mcp_servers
+import uuid
+import redis
+from models import Visit, Confirmation
+from system_agents.doctor_agent import configure_doctor_agent
+from utils import stream_agent_events
 
-MAX_NOTEST_LENGTH = 500
+REDIS_DEFAULT_HOST = "localhost"
+REDIS_DEFAULT_PORT = 6379
+REDIS_TLS_ENABLED = os.getenv("REDIS_TLS_ENABLED", "false").lower() == "true"
 
 
 @asynccontextmanager
@@ -54,6 +51,12 @@ async def lifespan(app: FastAPI):
         del app.state.healthcare_servers
 
 
+redis_client = redis.Redis(
+    host=os.getenv("REDIS_HOST", REDIS_DEFAULT_HOST),
+    port=int(os.getenv("REDIS_PORT", REDIS_DEFAULT_PORT)),
+    db=int(os.getenv("REDIS_DB", 0)),
+    ssl=REDIS_TLS_ENABLED,
+)
 app = FastAPI(lifespan=lifespan)
 
 # Add CORS middleware (allows frontend to call backend)
@@ -70,117 +73,107 @@ clerk_config = ClerkConfig(jwks_url=os.getenv("CLERK_JWKS_URL"))
 clerk_guard = ClerkHTTPBearer(clerk_config)
 
 
-class Visit(BaseModel):
-    patient_name: str
-    patient_email: str
-    date_of_visit: str
-    notes: str
-
-
-@input_guardrail(run_in_parallel=False)
-def notes_word_limit_guardrail(
-    context: RunContextWrapper[Visit],
-    _agent: Agent[Visit],
-    _agent_input: str | list[TResponseInputItem],
-) -> GuardrailFunctionOutput:
-    word_count = len(context.context.notes.split())
-    exceeds_limit = word_count > MAX_NOTEST_LENGTH
-    return GuardrailFunctionOutput(
-        output_info=(
-            f"Consultation notes are limited to {MAX_NOTEST_LENGTH} words. Please shorten the notes and try again."
-            if exceeds_limit
-            else f"Consultation notes contain {word_count} words."
-        ),
-        tripwire_triggered=exceeds_limit,
-    )
-
-
-system_prompt = """
-You are an AI doctor provided with health complaints of various patients.
-Your job is to examine the complaints in detail and provide a detailed diagnosis of the problem alongside a detailed patient prescription.
-Research about the patient's complaints with the tools your are equipped with.
-Reply with exactly three sections with the headings:
-### Summary the complains of the patient 
-### Next steps for the doctor
-### Draft of email to patient in patient-friendly language
-Always send an email to the patient' email address provided in the notes section with the following format
-### Email subject - the complain of the patient
-### Email body - with four major sections
-- ### Section 1: Diagnosis of the patient's complaintq
-- ### Section 2: Recommended treatment plan for the patient
-- ### Section 3: Prescribed drugs for the patient
-- ### Section 4: Date of the complain and a closing greeting
-"""
-
-
-def user_prompt_for(visit: Visit) -> str:
-    return f"""Create the summary, next steps and draft email for:
-Patient Name: {visit.patient_name}
-Patient Email: {visit.patient_email}
-Date of Visit: {visit.date_of_visit}
-Notes:
-{visit.notes}"""
-
-
 @app.post("/api/consultation", response_class=StreamingResponse)
 async def consultation_summary(
     visit: Visit,
+    session_id: str = Header(default=str(uuid.uuid4()), alias="X-Session-ID"),
+    last_event_id: int | None = Header(default=None, alias="Last-Event-ID"),
     creds: HTTPAuthorizationCredentials = Depends(clerk_guard),
 ):
-    with trace("Consultation Summary"):
-        user_id = creds.decoded["sub"]
-        project_id = os.getenv("PROJECT_ID")
-        bedrock_base_url = os.getenv("AWS_BEDROCK_BASE_URL")
-
-        if not project_id or not bedrock_base_url:
-            raise ValueError("PROJECT_ID and AWS_BEDROCK_BASE_URL must be set")
-
-        client = AsyncOpenAI(
-            api_key=provide_token(),
-            base_url=bedrock_base_url,
-            project=project_id,
+    user_id = creds.decoded["sub"]
+    user_sessionId = f"{user_id}_{session_id}"
+    redis_scheme = "rediss" if REDIS_TLS_ENABLED else "redis"
+    redis_session = RedisSession.from_url(
+        session_id=user_id,
+        url=f"{redis_scheme}://{os.getenv('REDIS_HOST', REDIS_DEFAULT_HOST)}:{os.getenv('REDIS_PORT', REDIS_DEFAULT_PORT)}",
+    )
+    doctor_agent = configure_doctor_agent(app.state.healthcare_servers)
+    user_prompt = visit.to_user_prompt()
+    with trace(f"Consultation Summary {user_sessionId}"):
+        stream = Runner.run_streamed(
+            starting_agent=doctor_agent,
+            input=user_prompt,
+            context=visit,
+            max_turns=5,
+            session=redis_session,
         )
 
-        model = OpenAIChatCompletionsModel(
-            model="openai.gpt-oss-120b", openai_client=client
+        return StreamingResponse(
+            stream_agent_events(stream, user_sessionId, redis_client),
+            media_type="text/event-stream",
         )
 
-        async def event_stream():
-            doctor_agent = Agent(
-                name="Doctor",
-                model=model,
-                instructions=system_prompt,
-                mcp_servers=cast(list[MCPServer], app.state.healthcare_servers),
-                tools=[send_prescription_email],
-                input_guardrails=[notes_word_limit_guardrail],
-            )
 
-            user_prompt = user_prompt_for(visit)
-            stream = Runner.run_streamed(
-                starting_agent=doctor_agent,
-                input=user_prompt,
-                context=visit,
-                max_turns=5,
-            )
-            try:
-                async for stream_event in stream.stream_events():
-                    if stream_event.type == "raw_response_event" and isinstance(
-                        stream_event.data, ResponseTextDeltaEvent
-                    ):
-                        text = stream_event.data.delta
-                        if text:
-                            lines = text.split("\n")
-                            for line in lines[:-1]:
-                                yield f"data: {line}\n\n"
-                                yield "data:  \n"
-                            yield f"data: {lines[-1]}\n\n"
-            except InputGuardrailTripwireTriggered as exc:
-                message = exc.guardrail_result.output.output_info
-                if not isinstance(message, str):
-                    raise
-                yield f"event: error\ndata: {json.dumps({'message': message})}\n\n"
+@app.post("/api/confirmation", response_class=StreamingResponse)
+async def confirm_tool_execution(
+    confirmation: Confirmation,
+    session_id: str = Header(default=str(uuid.uuid4()), alias="X-Session-ID"),
+    last_event_id: int | None = Header(default=None, alias="Last-Event-ID"),
+    creds: HTTPAuthorizationCredentials = Depends(clerk_guard),
+):
+    user_id = creds.decoded["sub"]
+    user_sessionId = f"{user_id}_{session_id}"
+    run_state_string = redis_client.get(f"run_state_interruption:{user_sessionId}")
 
-        return StreamingResponse(event_stream(), media_type="text/event-stream")
+    if run_state_string is None:
+        raise HTTPException(
+            status_code=404, detail="No pending action confirmations found"
+        )
+
+    if isinstance(run_state_string, bytes):
+        run_state_string = run_state_string.decode("utf-8")
+
+    try:
+        stored_state = json.loads(run_state_string)
+    except json.JSONDecodeError:
+        stored_state = run_state_string
+
+    if isinstance(stored_state, dict) and isinstance(
+        stored_state.get("run_state"), str
+    ):
+        run_state_string = stored_state["run_state"]
+
+    if not isinstance(run_state_string, str):
+        raise HTTPException(
+            status_code=400,
+            detail="Sorry, something went wrong with the confirmations",
+        )
+
+    doctor_agent = configure_doctor_agent(app.state.healthcare_servers)
+
+    run_state = await RunState.from_string(
+        doctor_agent,
+        run_state_string,
+        context_deserializer=lambda data: Visit.model_validate(data),
+    )
+    if not run_state:
+        raise HTTPException(
+            status_code=400,
+            detail="Sorry, something went wrong with the confirmations",
+        )
+
+    for interruption in run_state.get_interruptions():
+        confirmation_tool = next(
+            (
+                confirmation_tool
+                for confirmation_tool in confirmation.actions
+                if confirmation_tool.action_name == interruption.tool_name
+            ),
+            None,
+        )
+
+        if confirmation_tool is not None and confirmation_tool.is_approved:
+            run_state.approve(interruption)
+        else:
+            run_state.reject(interruption)
+
+    with trace(f"Confirmation {user_sessionId}"):
+        stream = Runner.run_streamed(doctor_agent, run_state)
+
+    return StreamingResponse(
+        stream_agent_events(stream, user_sessionId, redis_client),
+        media_type="text/event-stream",
+    )
 
 
 @app.get("/api/health")

@@ -1,7 +1,36 @@
 data "aws_caller_identity" "current" {}
 
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
+data "aws_subnet" "default" {
+  for_each = toset(data.aws_subnets.default.ids)
+  id       = each.value
+}
+
+data "aws_internet_gateway" "default" {
+  filter {
+    name   = "attachment.vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
 locals {
-  name_prefix = "${var.project_name}-${var.environment}"
+  name_prefix            = "${var.project_name}-${var.environment}"
+  default_vpc_subnet_ids = sort(data.aws_subnets.default.ids)
+  redis_lambda_subnet_cidr = cidrsubnet(
+    var.redis_lambda_subnet_cidr,
+    2,
+    index(["dev", "test", "prod"], var.environment),
+  )
 
   common_tags = {
     Project     = var.project_name
@@ -19,6 +48,100 @@ locals {
     }
     requirements = filesha256("${path.module}/${var.app_dir}/backend/requirements.txt")
   }))
+}
+
+# Redis requires Lambda to run inside the default VPC. The private subnet and NAT
+# gateway retain the Lambda's access to public services in every environment.
+resource "aws_subnet" "redis_lambda_private" {
+  vpc_id                  = data.aws_vpc.default.id
+  cidr_block              = local.redis_lambda_subnet_cidr
+  availability_zone       = data.aws_subnet.default[local.default_vpc_subnet_ids[0]].availability_zone
+  map_public_ip_on_launch = false
+  tags                    = merge(local.common_tags, { Name = "${local.name_prefix}-lambda-private" })
+}
+
+resource "aws_eip" "redis_lambda_nat" {
+  domain = "vpc"
+  tags   = merge(local.common_tags, { Name = "${local.name_prefix}-lambda-nat" })
+}
+
+resource "aws_nat_gateway" "redis_lambda" {
+  allocation_id = aws_eip.redis_lambda_nat.id
+  subnet_id     = local.default_vpc_subnet_ids[0]
+  tags          = merge(local.common_tags, { Name = "${local.name_prefix}-lambda-nat" })
+
+  depends_on = [data.aws_internet_gateway.default]
+}
+
+resource "aws_route_table" "redis_lambda_private" {
+  vpc_id = data.aws_vpc.default.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.redis_lambda.id
+  }
+
+  tags = merge(local.common_tags, { Name = "${local.name_prefix}-lambda-private" })
+}
+
+resource "aws_route_table_association" "redis_lambda_private" {
+  subnet_id      = aws_subnet.redis_lambda_private.id
+  route_table_id = aws_route_table.redis_lambda_private.id
+}
+
+resource "aws_security_group" "lambda_redis" {
+  name        = "${local.name_prefix}-lambda-redis"
+  description = "Outbound access for the ${var.environment} Lambda"
+  vpc_id      = data.aws_vpc.default.id
+  tags        = local.common_tags
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "redis" {
+  name        = "${local.name_prefix}-redis"
+  description = "Allow Redis traffic only from the ${var.environment} Lambda"
+  vpc_id      = data.aws_vpc.default.id
+  tags        = local.common_tags
+
+  ingress {
+    from_port       = var.redis_port
+    to_port         = var.redis_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.lambda_redis.id]
+  }
+}
+
+resource "aws_elasticache_subnet_group" "redis" {
+  name        = "${local.name_prefix}-redis"
+  subnet_ids  = local.default_vpc_subnet_ids
+  description = "Default VPC subnets for the ${var.environment} Redis instance"
+  tags        = local.common_tags
+}
+
+resource "aws_elasticache_replication_group" "redis" {
+  replication_group_id       = "${local.name_prefix}-redis"
+  description                = "Single-node ${var.environment} Redis for app state"
+  engine                     = "redis"
+  engine_version             = "7.1"
+  node_type                  = var.redis_node_type
+  num_cache_clusters         = 1
+  port                       = var.redis_port
+  subnet_group_name          = aws_elasticache_subnet_group.redis.name
+  security_group_ids         = [aws_security_group.redis.id]
+  at_rest_encryption_enabled = true
+  transit_encryption_enabled = true
+  transit_encryption_mode    = "required"
+  automatic_failover_enabled = false
+  multi_az_enabled           = false
+  apply_immediately          = true
+  snapshot_retention_limit   = 0
+  tags                       = local.common_tags
 }
 
 # S3 bucket for the statically exported frontend
@@ -170,6 +293,11 @@ resource "aws_iam_role_policy_attachment" "lambda_s3" {
   role       = aws_iam_role.lambda_role.name
 }
 
+resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+  role       = aws_iam_role.lambda_role.name
+}
+
 resource "aws_lambda_function" "app_lambda" {
   function_name = "${local.name_prefix}-app-lambda"
   role          = aws_iam_role.lambda_role.arn
@@ -178,7 +306,7 @@ resource "aws_lambda_function" "app_lambda" {
   image_uri     = "${aws_ecr_repository.doctor_assistant_repo.repository_url}:${random_id.app_rand_tag.hex}"
   memory_size   = 512
   timeout       = 60
-  depends_on    = [aws_iam_role_policy_attachment.lambda_basic_execution, aws_iam_role_policy_attachment.lambda_bedrock, aws_iam_role_policy_attachment.lambda_s3, null_resource.build_and_push_app_image]
+  depends_on    = [aws_iam_role_policy_attachment.lambda_basic_execution, aws_iam_role_policy_attachment.lambda_bedrock, aws_iam_role_policy_attachment.lambda_s3, aws_iam_role_policy_attachment.lambda_vpc_access, aws_route_table_association.redis_lambda_private, null_resource.build_and_push_app_image]
   # Prefer referencing Secrets Manager secrets by name/ARN.
   # Store secret values in AWS Secrets Manager and provide their names
   # via the variables `openrouter_secret_name`, `openai_secret_name`,
@@ -197,7 +325,15 @@ resource "aws_lambda_function" "app_lambda" {
       EMAIL_SMTP_SERVER             = "${var.email_smtp_server}"
       EMAIL_APP_PASSWORD_SECRET_ARN = "${data.aws_secretsmanager_secret.email_password.arn}"
       EMAIL_ADDRESS                 = "${var.email_address}"
+      REDIS_HOST                    = aws_elasticache_replication_group.redis.primary_endpoint_address
+      REDIS_PORT                    = tostring(var.redis_port)
+      REDIS_TLS_ENABLED             = "true"
     }
+  }
+
+  vpc_config {
+    subnet_ids         = [aws_subnet.redis_lambda_private.id]
+    security_group_ids = [aws_security_group.lambda_redis.id]
   }
 }
 
