@@ -1,12 +1,20 @@
 import json
+import logging
 import os
 from pathlib import Path
+import sys
 from dotenv import load_dotenv
 
 if not os.getenv("AWS_LAMBDA_FUNCTION_NAME") and not os.getenv(
     "AWS_LAMBDA_RUNTIME_API"
 ):
     load_dotenv(dotenv_path=Path(__file__).with_name(".env.local"))
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    stream=sys.stdout,
+)
 
 from fastapi import Depends, FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,13 +28,13 @@ from fastapi_clerk_auth import (
 from agents import (
     Runner,
     RunState,
+    SessionSettings,
     trace,
 )
 from agents.items import TResponseInputItem
 from agents.extensions.memory import RedisSession
 from contextlib import AsyncExitStack, asynccontextmanager
 
-from tools.email_tools import send_prescription_email
 from mcps import get_healthcare_mcp_servers
 import uuid
 import redis
@@ -84,8 +92,9 @@ async def consultation_summary(
     user_sessionId = f"{user_id}_{session_id}"
     redis_scheme = "rediss" if REDIS_TLS_ENABLED else "redis"
     redis_session = RedisSession.from_url(
-        session_id=user_id,
+        session_id=f"{user_id}_{session_id}",
         url=f"{redis_scheme}://{os.getenv('REDIS_HOST', REDIS_DEFAULT_HOST)}:{os.getenv('REDIS_PORT', REDIS_DEFAULT_PORT)}",
+        session_settings=SessionSettings(limit=10),
     )
     doctor_agent = configure_doctor_agent(app.state.healthcare_servers)
     user_prompt = visit.to_user_prompt()
@@ -94,7 +103,7 @@ async def consultation_summary(
             starting_agent=doctor_agent,
             input=user_prompt,
             context=visit,
-            max_turns=5,
+            max_turns=10,
             session=redis_session,
         )
 

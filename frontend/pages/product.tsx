@@ -13,18 +13,20 @@ import {
   UserButton,
 } from "@clerk/nextjs";
 import { ConsulationRequest } from "../models/consulation";
-import { ConfirmationRequest } from "../models/confirmation";
+import {
+  ConfirmationRequest,
+  TreatmentPlanEmailConfirmationRequest,
+} from "../models/confirmation";
 import { fetchEventStream } from "../utils/fetchEventStream";
-import { EmailPrescriptionConfirmationRequest } from "../models/confirmation";
 
 const BASE_API_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(
   /\/$/,
   "",
 );
 
-function isEmailPrescriptionConfirmationRequest(
+function isTreatmentPlanEmailConfirmationRequest(
   value: unknown,
-): value is EmailPrescriptionConfirmationRequest {
+): value is TreatmentPlanEmailConfirmationRequest {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -62,9 +64,14 @@ function ConsultationForm() {
   const [activity, setActivity] = useState<string[]>([]);
   const [interruptions, setInterruptions] = useState<string[]>([]);
   const sessionId = useRef<string | null>(null);
+  const activeRequestController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     sessionId.current = crypto.randomUUID();
+    return () => {
+      activeRequestController.current?.abort();
+      activeRequestController.current = null;
+    };
   }, []);
 
   async function handleSubmit(e: FormEvent) {
@@ -79,7 +86,16 @@ function ConsultationForm() {
     await fetchConsultation();
   }
 
+  function handleCancelRequest() {
+    activeRequestController.current?.abort();
+    activeRequestController.current = null;
+    setLoading(false);
+    setModalOpen(false);
+  }
+
   async function fetchConsultation() {
+    const controller = new AbortController();
+    activeRequestController.current = controller;
     const consultationUrl = BASE_API_URL
       ? `${BASE_API_URL}/api/consultation`
       : `/api/consultation`;
@@ -89,6 +105,7 @@ function ConsultationForm() {
       date_of_visit: visitDate?.toISOString().slice(0, 10) ?? "",
       notes,
     };
+    let buffer = "";
 
     try {
       await fetchEventStream(
@@ -101,9 +118,12 @@ function ConsultationForm() {
             skipCache: true,
           }),
         {
+          abortController: controller,
           sessionId: sessionId.current,
           onOpen: () => setErrorMessage(""),
-          onClose: () => setLoading(false),
+          onClose: () => {
+            buffer = "";
+          },
           onMessage(ev, abort) {
             console.log(
               `Event received: event:${ev.event} data: ${ev.data} id: ${ev.id}`,
@@ -111,8 +131,7 @@ function ConsultationForm() {
             if (ev.event === "progress") {
               setActivity((current) => [...current, ev.data].slice(-5));
               return true;
-            }
-            if (ev.event === "interruption") {
+            } else if (ev.event === "interruption") {
               let payload: unknown;
               try {
                 payload = JSON.parse(ev.data);
@@ -139,17 +158,16 @@ function ConsultationForm() {
 
               if (
                 "arguments" in payload &&
-                isEmailPrescriptionConfirmationRequest(payload.arguments)
+                isTreatmentPlanEmailConfirmationRequest(payload.arguments)
               ) {
                 setOutput(
-                  `##${payload.arguments.subject}\n${payload.arguments.text_body || parseHtml(payload.arguments.html_body)}`,
+                  `Treatment email approval\n${payload.arguments.subject}\n${payload.arguments.text_body || parseHtml(payload.arguments.html_body)}`,
                 );
               }
 
               setInterruptions((current) => [...current, actionName]);
               return true;
-            }
-            if (ev.event === "error") {
+            } else if (ev.event === "error") {
               let message =
                 "We couldn’t validate your consultation notes. Please try again.";
               try {
@@ -170,6 +188,10 @@ function ConsultationForm() {
               setLoading(false);
               abort();
               return true;
+            } else {
+              console.warn("Unhandled event type:", ev.event);
+              buffer += ev.data;
+              setOutput(buffer);
             }
             return false;
           },
@@ -183,11 +205,17 @@ function ConsultationForm() {
         },
       );
     } catch (error) {
-      console.error("Consultation stream failed:", error);
-      setErrorMessage(
-        error instanceof Error ? error.message : "Authentication required",
-      );
-      setLoading(false);
+      if (!controller.signal.aborted) {
+        console.error("Consultation stream failed:", error);
+        setErrorMessage(
+          error instanceof Error ? error.message : "Authentication required",
+        );
+      }
+    } finally {
+      if (activeRequestController.current === controller) {
+        activeRequestController.current = null;
+        setLoading(false);
+      }
     }
   }
 
@@ -201,12 +229,7 @@ function ConsultationForm() {
 
   async function handleRejectInterruptions() {
     console.info("Reject interruptions (frontend placeholder):", interruptions);
-    setLoading(true);
-    try {
-      await handleConfirmInterruptions(false);
-    } finally {
-      setLoading(false);
-    }
+    await handleConfirmInterruptions(false);
   }
 
   async function handleConfirmInterruptions(approved: boolean) {
@@ -225,6 +248,9 @@ function ConsultationForm() {
   }
 
   async function submitConfirmation(request: ConfirmationRequest) {
+    const controller = new AbortController();
+    activeRequestController.current = controller;
+    setLoading(true);
     const confirmationUrl = BASE_API_URL
       ? `${BASE_API_URL}/api/confirmation`
       : `/api/confirmation`;
@@ -238,14 +264,23 @@ function ConsultationForm() {
             template: "test_jwt_template",
             skipCache: true,
           }),
-        { sessionId: sessionId.current },
+        {
+          abortController: controller,
+          sessionId: sessionId.current,
+        },
       );
     } catch (error) {
-      console.error("Confirmation stream failed:", error);
-      setErrorMessage(
-        error instanceof Error ? error.message : "Authentication required",
-      );
-      setLoading(false);
+      if (!controller.signal.aborted) {
+        console.error("Confirmation stream failed:", error);
+        setErrorMessage(
+          error instanceof Error ? error.message : "Authentication required",
+        );
+      }
+    } finally {
+      if (activeRequestController.current === controller) {
+        activeRequestController.current = null;
+        setLoading(false);
+      }
     }
   }
 
@@ -360,6 +395,7 @@ function ConsultationForm() {
           loading={loading}
           onApprove={handleApproveInterruptions}
           onClose={() => setModalOpen(false)}
+          onCancel={handleCancelRequest}
           onReject={handleRejectInterruptions}
           open={modalOpen}
           output={output}

@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 def _process_interruption(interruption: ToolApprovalItem) -> dict[str, object]:
     payload: dict[str, object] = {"pending_action": interruption.tool_name}
-    if interruption.tool_name != "send_prescription_email":
+    if interruption.tool_name != "send_treatment_plan_email":
         return payload
 
     raw_arguments = interruption.arguments

@@ -8,7 +8,7 @@ class Visit(BaseModel):
     notes: str
 
     def to_user_prompt(self) -> str:
-        return f"""Create the summary, next steps and prescription email for:
+        return f"""Create the summary, diagnosis, next steps and treatment-plan email for:
 Patient Name: {self.patient_name}
 Patient Email: {self.patient_email}
 Date of Visit: {self.date_of_visit}

@@ -4,16 +4,14 @@ from openai import AsyncOpenAI
 from agents import (
     Agent,
     OpenAIChatCompletionsModel,
-    ModelSettings,
     GuardrailFunctionOutput,
     RunContextWrapper,
     TResponseInputItem,
-    StopAtTools,
     input_guardrail,
 )
 from agents.mcp import MCPServer
 from aws_bedrock_token_generator import provide_token
-from tools import send_prescription_email
+from tools import send_treatment_plan_email
 from models import Visit
 from prompts import AI_DOC_SYSTEM_PROMPT
 
@@ -60,12 +58,9 @@ def configure_doctor_agent(healthcare_mcp_servers: list[MCPServer]) -> Agent:
         model=model,
         instructions=AI_DOC_SYSTEM_PROMPT,
         mcp_servers=cast(list[MCPServer], healthcare_mcp_servers),
-        tools=[send_prescription_email],
-        tool_use_behavior=StopAtTools(
-            {"stop_at_tool_names": ["send_prescription_email"]}
-        ),
+        mcp_config={"convert_schemas_to_strict": True},
+        tools=[send_treatment_plan_email],
         input_guardrails=[notes_word_limit_guardrail],
-        model_settings=ModelSettings(tool_choice="send_prescription_email"),
     )
 
     return doctor_agent

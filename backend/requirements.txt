@@ -7,3 +7,4 @@ fastapi-clerk-auth
 pydantic
 openai-agents
 redis
+boto3

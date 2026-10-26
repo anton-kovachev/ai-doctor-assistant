@@ -22,6 +22,7 @@ const MAX_AUTHORIZATION_RETRIES = 10;
 const AUTHORIZATION_RETRY_DELAY_MS = 1000;
 
 type FetchEventStreamOptions = {
+  abortController?: AbortController;
   sessionId?: string | null;
   onMessage?: (event: EventSourceMessage, abort: () => void) => boolean;
   onOpen?: () => void;
@@ -36,12 +37,19 @@ export async function fetchEventStream(
   getToken?: GetToken,
   options: FetchEventStreamOptions = {},
 ): Promise<void> {
+  const controller = options.abortController ?? new AbortController();
+  if (controller.signal.aborted) {
+    return;
+  }
+
   let token: string | null = getToken ? await getToken() : null;
+  if (controller.signal.aborted) {
+    return;
+  }
   if (getToken && !token) {
     throw new Error("Authentication required");
   }
 
-  const controller = new AbortController();
   let authenticationError: unknown;
   let authorizationRetries = 0;
   let output = "";

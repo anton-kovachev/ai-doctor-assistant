@@ -10,6 +10,7 @@ type ConsultationResultModalProps = {
   output: string;
   errorMessage: string;
   onClose: () => void;
+  onCancel: () => void;
   onApprove: () => void;
   onReject: () => void;
 };
@@ -22,6 +23,7 @@ export default function ConsultationResultModal({
   output,
   errorMessage,
   onClose,
+  onCancel,
   onApprove,
   onReject,
 }: ConsultationResultModalProps) {
@@ -44,7 +46,16 @@ export default function ConsultationResultModal({
           >
             {loading ? "Generating consultation" : "Consultation result"}
           </h2>
-          {!loading && interruptions.length === 0 && (
+          {loading ? (
+            <button
+              aria-label="Cancel request and close consultation"
+              className="rounded-lg bg-red-600 px-3 py-1 font-semibold text-white hover:bg-red-700"
+              onClick={onCancel}
+              type="button"
+            >
+              Cancel
+            </button>
+          ) : interruptions.length === 0 ? (
             <button
               aria-label="Close consultation result"
               className="rounded px-3 py-1 font-bold text-white hover:brightness-90"
@@ -54,7 +65,7 @@ export default function ConsultationResultModal({
             >
               Close
             </button>
-          )}
+          ) : null}
         </div>
 
         {errorMessage && (

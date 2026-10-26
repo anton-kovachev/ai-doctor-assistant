@@ -7,7 +7,7 @@ export type ConfirmationRequest = {
   actions: Array<ConfirmationActionRequest>;
 };
 
-export type EmailPrescriptionConfirmationRequest = {
+export type TreatmentPlanEmailConfirmationRequest = {
   to_email: string;
   subject: string;
   text_body: string;
